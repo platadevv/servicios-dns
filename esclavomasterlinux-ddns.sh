@@ -11,7 +11,6 @@ mkdir -p "$DIR/zonas"
 CONFIG="$DIR/named.conf.local"
 DHCP_CONF="$DIR/dhcpd.conf.generado"
 DHCP_DEFAULT="$DIR/isc-dhcp-server.generado"
-KEY_FILE="$DIR/rndc.key.generado"
 APPARMOR_FILE="$DIR/apparmor.named.generado"
 INSTALL_SCRIPT="$DIR/instalar.sh"
 
@@ -19,19 +18,12 @@ echo "" > "$CONFIG"
 echo "" > "$DHCP_CONF"
 
 echo "=========================================================="
-echo "   GENERADOR DDNS INDESTRUCTIBLE (SINTAXIS DEL PROFESOR)"
+echo "   GENERADOR DDNS INDESTRUCTIBLE (NATIVO DEBIAN)"
 echo "=========================================================="
 
 # ========================================================
-# 2. GENERAR LLAVE OFICIAL RNDC-KEY (Formato BIND9)
+# 2. EXCEPCIONES Y CONFIGURACIONES BASE
 # ========================================================
-cat > "$KEY_FILE" <<EOF
-key "rndc-key" {
-    algorithm hmac-sha256;
-    secret "LaB/sEcReTa/DdNs/KeY==";
-};
-EOF
-
 # Excepcion de AppArmor para la carpeta zonas
 cat > "$APPARMOR_FILE" <<EOF
 /etc/bind/zonas/** rw,
@@ -178,6 +170,9 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+echo "0. Limpiando posibles caracteres CRLF de Windows..."
+sed -i 's/\r//g' named.conf.local dhcpd.conf.generado isc-dhcp-server.generado apparmor.named.generado 2>/dev/null || true
+
 echo "1. Asegurando existencia de directorios..."
 mkdir -p /etc/bind/zonas
 cp zonas/* /etc/bind/zonas/ 2>/dev/null || true
@@ -187,23 +182,25 @@ cp named.conf.local /etc/bind/
 cp dhcpd.conf.generado /etc/dhcp/dhcpd.conf
 cp isc-dhcp-server.generado /etc/default/isc-dhcp-server
 
-echo "3. Instalando llaves oficiales rndc.key..."
-cp rndc.key.generado /etc/bind/rndc.key
-cp rndc.key.generado /etc/dhcp/rndc.key
+echo "3. Generando llave nativa de BIND (rndc-confgen)..."
+rm -f /etc/bind/rndc.key /etc/dhcp/rndc.key
+rndc-confgen -a -c /etc/bind/rndc.key -u bind
+cp /etc/bind/rndc.key /etc/dhcp/rndc.key
 
-echo "4. El paso del Profesor: Incluir la llave en el named.conf principal si no esta..."
+echo "4. Inyectando la llave en el named.conf principal si no esta..."
 if ! grep -q 'include "/etc/bind/rndc.key";' /etc/bind/named.conf; then
-    # Lo añadimos al principio del fichero principal named.conf
     sed -i '1iinclude "/etc/bind/rndc.key";' /etc/bind/named.conf
 fi
 
 echo "5. Configurando excepciones de AppArmor..."
 cp apparmor.named.generado /etc/apparmor.d/local/usr.sbin.named
 
-echo "6. Ajustando propietarios y permisos de seguridad..."
-chown bind:bind /etc/bind/rndc.key
-chown dhcpd:dhcpd /etc/dhcp/rndc.key
+echo "6. Ajustando propietarios y permisos de seguridad (Estilo Debian)..."
+# Permisos para BIND (el comando rndc-confgen ya le da dueño 'bind')
 chmod 640 /etc/bind/rndc.key
+
+# Permisos para DHCP (Usamos root:root como manda el sistema)
+chown root:root /etc/dhcp/rndc.key
 chmod 640 /etc/dhcp/rndc.key
 
 chown -R bind:bind /etc/bind/zonas
@@ -225,9 +222,9 @@ chmod +x "$INSTALL_SCRIPT"
 
 clear
 echo "=========================================================="
-echo "    INSTALADOR ACTUALIZADO CON ÉXITO (MÉTODO PROFESOR)"
+echo "    INSTALADOR ACTUALIZADO CON ÉXITO (MÉTODO NATIVO)"
 echo "=========================================================="
-echo "Para desplegar el entorno corregido ejecute:"
+echo "Para desplegar el entorno ejecuta:"
 echo "  1) cd $DIR"
 echo "  2) sudo ./instalar.sh"
 echo "=========================================================="
