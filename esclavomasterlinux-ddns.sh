@@ -2,7 +2,7 @@
 
 clear
 
-# 1. CREAR EL DIRECTORIO DE TRABAJO (Donde se ejecuta este script)
+# 1. CREAR EL DIRECTORIO DE TRABAJO
 DIR_SALIDA="despliegue_ddns"
 mkdir -p "$DIR_SALIDA/zonas"
 
@@ -20,12 +20,12 @@ echo "   GENERADOR DNS MULTIZONA (ESCLAVO + DDNS MAESTRO)"
 echo "=========================================================="
 
 #################################################
-# 2. LLAVE TSIG (GLOBAL)
+# 2. LLAVE TSIG (SIN COMILLAS EN EL NOMBRE)
 #################################################
 LLAVE_SECRETA="LaB/sEcReTa/DdNs/KeY=="
 
 cat > "$KEY_FILE" <<EOF
-key "rndc-key" {
+key rndc-key {
     algorithm hmac-sha256;
     secret "$LLAVE_SECRETA";
 };
@@ -112,7 +112,7 @@ if [[ $NUM_DDNS -gt 0 ]]; then
         echo
         echo "=========== RED DINAMICA $d ==========="
         read -p "Nombre del dominio DDNS (ej: red1.dominio.org): " DOM_DDNS
-        read -p "Red dinamica (ej: 192.168.10): " RED_DDNS
+        read -p "Red dinamica, pon SOLO LOS 3 PRIMEROS OCTETOS (ej: 192.168.10): " RED_DDNS
         read -p "Mascara CIDR (ej: 24): " MASK_DDNS
         read -p "IP de este servidor Linux en esta red: " IP_LINUX_DDNS
         read -p "Rango DHCP Inicio (ej: 192.168.10.50): " DHCP_START
@@ -121,7 +121,7 @@ if [[ $NUM_DDNS -gt 0 ]]; then
         INV_DDNS=$(echo $RED_DDNS | awk -F. '{print $3"."$2"."$1}')
 
         #################################################
-        # named.conf.local (Añadir Zonas)
+        # named.conf.local (Añadir Zonas sin comillas en key)
         #################################################
         cat >> "$CONFIG" <<EOF
 
@@ -130,34 +130,33 @@ if [[ $NUM_DDNS -gt 0 ]]; then
 //////////////////////////////////////////////////
 zone "$DOM_DDNS" {
     type master;
-    // RUTA DEL PROFESOR: /etc/bind/zonas/
     file "/etc/bind/zonas/db.$DOM_DDNS"; 
-    allow-update { key "rndc-key"; };
+    allow-update { key rndc-key; };
     allow-query { any; };
 };
 
 zone "$INV_DDNS.in-addr.arpa" {
     type master;
     file "/etc/bind/zonas/db.$RED_DDNS";
-    allow-update { key "rndc-key"; };
+    allow-update { key rndc-key; };
     allow-query { any; };
 };
 EOF
 
         #################################################
-        # DHCP (Añadir Subred y Zonas)
+        # DHCP (Añadir Subred y Zonas sin comillas en key)
         #################################################
         cat >> "$DHCP_CONF" <<EOF
 
 # Actualizacion DDNS para $DOM_DDNS
 zone $DOM_DDNS. {
     primary 127.0.0.1;
-    key "rndc-key";
+    key rndc-key;
 }
 
 zone $INV_DDNS.in-addr.arpa. {
     primary 127.0.0.1;
-    key "rndc-key";
+    key rndc-key;
 }
 
 # Subred $RED_DDNS.0
@@ -173,7 +172,7 @@ subnet $RED_DDNS.0 netmask 255.255.255.0 {
 EOF
 
         #################################################
-        # Archivos de zona base (Plantillas)
+        # Archivos de zona base
         #################################################
         DIRECTO="$DIR_SALIDA/zonas/db.$DOM_DDNS"
         INVERSO="$DIR_SALIDA/zonas/db.$RED_DDNS"
@@ -202,10 +201,8 @@ EOF
 fi
 
 #################################################
-# 6. GENERAR EL SCRIPT INSTALADOR AUTOMÁTICO
+# 6. SCRIPT INSTALADOR
 #################################################
-# Usamos 'EOF' entre comillas para que bash no evalúe las variables aquí dentro,
-# sino que las escriba literalmente en el script final.
 cat > "$INSTALL_SCRIPT" << 'EOF'
 #!/bin/bash
 
@@ -234,7 +231,7 @@ cp rndc.key.generado /etc/dhcp/rndc.key
 echo "[4/6] Aplicando reglas de seguridad AppArmor..."
 cp apparmor.named.generado /etc/apparmor.d/local/usr.sbin.named
 
-echo "[5/6] Ajustando permisos y propietarios (CRITICO para DDNS)..."
+echo "[5/6] Ajustando permisos y propietarios..."
 chown bind:bind /etc/bind/rndc.key
 chown dhcpd:dhcpd /etc/dhcp/rndc.key
 chmod 640 /etc/bind/rndc.key
@@ -258,7 +255,6 @@ systemctl status isc-dhcp-server --no-pager | grep Active
 echo "============================================="
 EOF
 
-# Dar permisos de ejecución al instalador
 chmod +x "$INSTALL_SCRIPT"
 
 clear
@@ -267,7 +263,7 @@ echo "    ARCHIVOS Y SCRIPT INSTALADOR GENERADOS CON EXITO"
 echo "=========================================================="
 echo "Se ha creado la carpeta: $DIR_SALIDA/"
 echo ""
-echo "Para instalar todo el entorno, simplemente ejecuta:"
+echo "Recuerda entrar y ejecutar el instalador:"
 echo "  1) cd $DIR_SALIDA"
 echo "  2) sudo ./instalar.sh"
 echo "=========================================================="
