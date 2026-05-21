@@ -13,10 +13,9 @@ echo "" > "$CONFIG"
 echo "" > "$CONFIG_SLAVE"
 
 echo "=========================================================="
-echo "        GENERADOR BIND9 - MODO MAESTRO PURO (FIX WINDOWS)"
+echo "        GENERADOR BIND9 - MODO MAESTRO PURO (FIX ZONAS)"
 echo "=========================================================="
 
-# Bucle Principal de Redes/Zonas Maestras
 ZONA_NUM=1
 while true; do
     echo
@@ -29,19 +28,18 @@ while true; do
     if [[ "$CONF_PRINCIPAL" == "s" || "$CONF_PRINCIPAL" == "S" ]]; then
         read -p "Nombre del Dominio (ej: principal.com): " DOM
         read -p "Red de este dominio (SOLO 3 OCTETOS, ej: 192.168.1): " RED
-        read -p "Hostname de ESTE servidor Maestro (ej: ns1 o master): " HOST_MASTER
+        read -p "Hostname de ESTE servidor Maestro (ej: ns1): " HOST_MASTER
         read -p "IP de ESTE servidor Maestro: " IP_MASTER
         read -p "Correo del Administrador (ej: admin.principal.com.): " ADMIN
         
         INV_RED=$(echo $RED | awk -F. '{print $3"."$2"."$1}')
         
-        # Opciones de Transferencia
         read -p "¿Esta zona principal se va a transferir a un servidor Esclavo? (s/n): " TRANSF_PRINCIPAL
         
         if [[ "$TRANSF_PRINCIPAL" == "s" || "$TRANSF_PRINCIPAL" == "S" ]]; then
             read -p "¿El servidor Esclavo es Windows o Linux? (w/l): " OS_ESCLAVO
             read -p "IP del servidor Esclavo: " IP_SLAVE
-            read -p "Hostname del Esclavo (ej: ns2 o slave): " HOST_SLAVE
+            read -p "Hostname del Esclavo (ej: ns2): " HOST_SLAVE
             
             cat >> "$CONFIG" <<EOF
 
@@ -101,52 +99,80 @@ zone "$INV_RED.in-addr.arpa" {
 EOF
         fi
 
+        # ========================================================
+        # GENERACIÓN DEL FICHERO DIRECTO (CALCADO A LA CAPTURA)
+        # ========================================================
         DIRECTO="$DIR/zonas/db.$DOM"
         INVERSO="$DIR/zonas/db.$RED"
 
-        # ¡AQUÍ ESTÁ LA MAGIA PARA WINDOWS! -> $HOST_MASTER.$DOM. en el SOA
         cat > "$DIRECTO" <<EOF
-\$TTL 604800
-@   IN  SOA $HOST_MASTER.$DOM. $ADMIN ( 2 604800 86400 2419200 604800 )
+\$ORIGIN $DOM.
+\$TTL 86400
+@   IN  SOA $HOST_MASTER.$DOM. $ADMIN (
+                1
+                604800
+                86400
+                2419200
+                604800 )
 @   IN  NS  $HOST_MASTER.$DOM.
 EOF
-        cat > "$INVERSO" <<EOF
-\$TTL 604800
-@   IN  SOA $HOST_MASTER.$DOM. $ADMIN ( 2 604800 86400 2419200 604800 )
-@   IN  NS  $HOST_MASTER.$DOM.
-EOF
-        
-        echo "$HOST_MASTER IN A $IP_MASTER" >> "$DIRECTO"
-        OCT_MASTER=$(echo $IP_MASTER | awk -F. '{print $4}')
-        echo "$OCT_MASTER IN PTR $HOST_MASTER.$DOM." >> "$INVERSO"
-
         if [[ "$TRANSF_PRINCIPAL" == "s" || "$TRANSF_PRINCIPAL" == "S" ]]; then
             echo "@   IN  NS  $HOST_SLAVE.$DOM." >> "$DIRECTO"
-            echo "@   IN  NS  $HOST_SLAVE.$DOM." >> "$INVERSO"
-            echo "$HOST_SLAVE IN A $IP_SLAVE" >> "$DIRECTO"
-            OCT_SLAVE=$(echo $IP_SLAVE | awk -F. '{print $4}')
-            echo "$OCT_SLAVE IN PTR $HOST_SLAVE.$DOM." >> "$INVERSO"
         fi
 
+        echo "$HOST_MASTER   IN  A   $IP_MASTER" >> "$DIRECTO"
+        if [[ "$TRANSF_PRINCIPAL" == "s" || "$TRANSF_PRINCIPAL" == "S" ]]; then
+            echo "$HOST_SLAVE   IN  A   $IP_SLAVE" >> "$DIRECTO"
+        fi
+
+        # ========================================================
+        # GENERACIÓN DEL FICHERO INVERSO (CALCADO A LA CAPTURA)
+        # ========================================================
+        cat > "$INVERSO" <<EOF
+\$ORIGIN $INV_RED.in-addr.arpa.
+\$TTL 86400
+@   IN  SOA $HOST_MASTER.$DOM. $ADMIN (
+                1
+                604800
+                86400
+                2419200
+                604800 )
+@   IN  NS  $HOST_MASTER.$DOM.
+EOF
+        if [[ "$TRANSF_PRINCIPAL" == "s" || "$TRANSF_PRINCIPAL" == "S" ]]; then
+            echo "@   IN  NS  $HOST_SLAVE.$DOM." >> "$INVERSO"
+        fi
+
+        OCT_MASTER=$(echo $IP_MASTER | awk -F. '{print $4}')
+        echo "$OCT_MASTER   IN  PTR $HOST_MASTER.$DOM." >> "$INVERSO"
+        
+        if [[ "$TRANSF_PRINCIPAL" == "s" || "$TRANSF_PRINCIPAL" == "S" ]]; then
+            OCT_SLAVE=$(echo $IP_SLAVE | awk -F. '{print $4}')
+            echo "$OCT_SLAVE   IN  PTR $HOST_SLAVE.$DOM." >> "$INVERSO"
+        fi
+
+        # ========================================================
+        # HOSTS EXTRA DE LA ZONA
+        # ========================================================
         echo
         read -p "¿Cuántos hosts extra vas a configurar en $DOM? (0 si ninguno): " NUM_HOSTS
         if [[ $NUM_HOSTS -gt 0 ]]; then
             for ((h=1; h<=NUM_HOSTS; h++))
             do
                 echo "--- HOST $h ($DOM) ---"
-                read -p "Hostname (sin dominio, ej: pc01): " H_NAME
+                read -p "Hostname (sin dominio, ej: pc1): " H_NAME
                 read -p "Alias CNAME (deja vacío si no tiene): " H_ALIAS
                 read -p "IP completa del host: " H_IP
                 
-                echo "$H_NAME IN A $H_IP" >> "$DIRECTO"
+                echo "$H_NAME   IN  A   $H_IP" >> "$DIRECTO"
                 if [[ -n "$H_ALIAS" ]]; then
-                    echo "$H_ALIAS IN CNAME $H_NAME" >> "$DIRECTO"
+                    echo "$H_ALIAS   IN  CNAME $H_NAME" >> "$DIRECTO"
                 fi
                 
                 OCT_H=$(echo $H_IP | awk -F. '{print $4}')
                 read -p "¿Añadir PTR a la inversa para $H_NAME? (s/n): " ADD_PTR
                 if [[ "$ADD_PTR" == "s" || "$ADD_PTR" == "S" ]]; then
-                    echo "$OCT_H IN PTR $H_NAME.$DOM." >> "$INVERSO"
+                    echo "$OCT_H   IN  PTR $H_NAME.$DOM." >> "$INVERSO"
                 fi
             done
         fi
@@ -216,15 +242,27 @@ EOF
             EDIRECTO="$DIR/zonas/db.$EDOM"
             EINVERSO="$DIR/zonas/db.$ERED"
 
-            # FQDN también aquí para compatibilidad total con Windows
+            # Formato de capturas para las zonas extra
             cat > "$EDIRECTO" <<EOF
-\$TTL 604800
-@   IN  SOA $HOST_MASTER.$DOM. $EADMIN ( 2 604800 86400 2419200 604800 )
+\$ORIGIN $EDOM.
+\$TTL 86400
+@   IN  SOA $HOST_MASTER.$DOM. $EADMIN (
+                1
+                604800
+                86400
+                2419200
+                604800 )
 @   IN  NS  $HOST_MASTER.$DOM.
 EOF
             cat > "$EINVERSO" <<EOF
-\$TTL 604800
-@   IN  SOA $HOST_MASTER.$DOM. $EADMIN ( 2 604800 86400 2419200 604800 )
+\$ORIGIN $EINV_RED.in-addr.arpa.
+\$TTL 86400
+@   IN  SOA $HOST_MASTER.$DOM. $EADMIN (
+                1
+                604800
+                86400
+                2419200
+                604800 )
 @   IN  NS  $HOST_MASTER.$DOM.
 EOF
             
@@ -238,15 +276,15 @@ EOF
                     read -p "Alias CNAME (deja vacío si no tiene): " EH_ALIAS
                     read -p "IP completa del host: " EH_IP
                     
-                    echo "$EH_NAME IN A $EH_IP" >> "$EDIRECTO"
+                    echo "$EH_NAME   IN  A   $EH_IP" >> "$EDIRECTO"
                     if [[ -n "$EH_ALIAS" ]]; then
-                        echo "$EH_ALIAS IN CNAME $EH_NAME" >> "$EDIRECTO"
+                        echo "$EH_ALIAS   IN  CNAME $EH_NAME" >> "$EDIRECTO"
                     fi
                     
                     EOCT_H=$(echo $EH_IP | awk -F. '{print $4}')
                     read -p "¿Añadir PTR a la inversa para $EH_NAME? (s/n): " EADD_PTR
                     if [[ "$EADD_PTR" == "s" || "$EADD_PTR" == "S" ]]; then
-                        echo "$EOCT_H IN PTR $EH_NAME.$EDOM." >> "$EINVERSO"
+                        echo "$EOCT_H   IN  PTR $EH_NAME.$EDOM." >> "$EINVERSO"
                     fi
                 done
             fi
@@ -297,7 +335,7 @@ chmod +x "$INSTALL_SCRIPT"
 
 clear
 echo "=========================================================="
-echo "    SCRIPT DE DNS MAESTRO (FIX WINDOWS) GENERADO"
+echo "    SCRIPT DE DNS MAESTRO (CON ESTRUCTURA DE ZONA FIJADA)"
 echo "=========================================================="
 echo "ARCHIVOS GENERADOS EN: $DIR/"
 echo "Para instalar en ESTA máquina ejecuta:"
