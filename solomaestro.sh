@@ -13,7 +13,7 @@ echo "" > "$CONFIG"
 echo "" > "$CONFIG_SLAVE"
 
 echo "=========================================================="
-echo "        GENERADOR BIND9 - MODO MAESTRO PURO"
+echo "        GENERADOR BIND9 - MODO MAESTRO PURO (FIX WINDOWS)"
 echo "=========================================================="
 
 # Bucle Principal de Redes/Zonas Maestras
@@ -35,7 +35,7 @@ while true; do
         
         INV_RED=$(echo $RED | awk -F. '{print $3"."$2"."$1}')
         
-        # Opciones de Transferencia para la Zona Principal
+        # Opciones de Transferencia
         read -p "¿Esta zona principal se va a transferir a un servidor Esclavo? (s/n): " TRANSF_PRINCIPAL
         
         if [[ "$TRANSF_PRINCIPAL" == "s" || "$TRANSF_PRINCIPAL" == "S" ]]; then
@@ -43,7 +43,6 @@ while true; do
             read -p "IP del servidor Esclavo: " IP_SLAVE
             read -p "Hostname del Esclavo (ej: ns2 o slave): " HOST_SLAVE
             
-            # Bloque Maestro CON Transferencia
             cat >> "$CONFIG" <<EOF
 
 // ZONA PRINCIPAL: $DOM (CON TRANSFERENCIA A $IP_SLAVE)
@@ -65,12 +64,10 @@ zone "$INV_RED.in-addr.arpa" {
     notify yes;
 };
 EOF
-            
-            # Generar config Esclava SOLO si es Linux
             if [[ "$OS_ESCLAVO" == "l" || "$OS_ESCLAVO" == "L" ]]; then
                 cat >> "$CONFIG_SLAVE" <<EOF
 
-// ZONA ESCLAVA: $DOM (DESDE MAESTRO $IP_MASTER)
+// ZONA ESCLAVA: $DOM
 zone "$DOM" {
     type slave;
     file "/var/cache/bind/db.$DOM";
@@ -87,10 +84,9 @@ zone "$INV_RED.in-addr.arpa" {
 EOF
             fi
         else
-            # Bloque Maestro SIN Transferencia (Aislado)
             cat >> "$CONFIG" <<EOF
 
-// ZONA PRINCIPAL: $DOM (AISLADA - SIN TRANSFERENCIA)
+// ZONA PRINCIPAL: $DOM (AISLADA)
 zone "$DOM" {
     type master;
     file "/etc/bind/zonas/db.$DOM";
@@ -105,22 +101,21 @@ zone "$INV_RED.in-addr.arpa" {
 EOF
         fi
 
-        # Crear los ficheros de Zona Base
         DIRECTO="$DIR/zonas/db.$DOM"
         INVERSO="$DIR/zonas/db.$RED"
 
+        # ¡AQUÍ ESTÁ LA MAGIA PARA WINDOWS! -> $HOST_MASTER.$DOM. en el SOA
         cat > "$DIRECTO" <<EOF
 \$TTL 604800
-@   IN  SOA $DOM. $ADMIN ( 2 604800 86400 2419200 604800 )
+@   IN  SOA $HOST_MASTER.$DOM. $ADMIN ( 2 604800 86400 2419200 604800 )
 @   IN  NS  $HOST_MASTER.$DOM.
 EOF
         cat > "$INVERSO" <<EOF
 \$TTL 604800
-@   IN  SOA $INV_RED.in-addr.arpa. $ADMIN ( 2 604800 86400 2419200 604800 )
+@   IN  SOA $HOST_MASTER.$DOM. $ADMIN ( 2 604800 86400 2419200 604800 )
 @   IN  NS  $HOST_MASTER.$DOM.
 EOF
         
-        # Añadir Registros del Maestro (y Esclavo si existe)
         echo "$HOST_MASTER IN A $IP_MASTER" >> "$DIRECTO"
         OCT_MASTER=$(echo $IP_MASTER | awk -F. '{print $4}')
         echo "$OCT_MASTER IN PTR $HOST_MASTER.$DOM." >> "$INVERSO"
@@ -133,7 +128,6 @@ EOF
             echo "$OCT_SLAVE IN PTR $HOST_SLAVE.$DOM." >> "$INVERSO"
         fi
 
-        # Hosts Adicionales de la Zona Principal
         echo
         read -p "¿Cuántos hosts extra vas a configurar en $DOM? (0 si ninguno): " NUM_HOSTS
         if [[ $NUM_HOSTS -gt 0 ]]; then
@@ -163,7 +157,6 @@ EOF
     # ========================================================
     echo
     echo "--- OTROS DOMINIOS / SUBDOMINIOS A TRANSFERIR ---"
-    echo "NOTA: Debes escribir el nombre del dominio completo a mano."
     read -p "¿Cuántas zonas extra vas a crear y transferir? (0 si ninguna): " NUM_EXTRA
     
     if [[ $NUM_EXTRA -gt 0 ]]; then
@@ -179,7 +172,6 @@ EOF
             
             EINV_RED=$(echo $ERED | awk -F. '{print $3"."$2"."$1}')
 
-            # Maestro de la Zona Extra
             cat >> "$CONFIG" <<EOF
 
 // ZONA EXTRA: $EDOM
@@ -201,7 +193,6 @@ zone "$EINV_RED.in-addr.arpa" {
     notify yes;
 };
 EOF
-            # Esclavo de la Zona Extra (Solo si es Linux)
             if [[ "$EOS_ESCLAVO" == "l" || "$EOS_ESCLAVO" == "L" ]]; then
                 cat >> "$CONFIG_SLAVE" <<EOF
 
@@ -222,22 +213,21 @@ zone "$EINV_RED.in-addr.arpa" {
 EOF
             fi
 
-            # Archivos Directo e Inverso de la Zona Extra
             EDIRECTO="$DIR/zonas/db.$EDOM"
             EINVERSO="$DIR/zonas/db.$ERED"
 
+            # FQDN también aquí para compatibilidad total con Windows
             cat > "$EDIRECTO" <<EOF
 \$TTL 604800
-@   IN  SOA $EDOM. $EADMIN ( 2 604800 86400 2419200 604800 )
+@   IN  SOA $HOST_MASTER.$DOM. $EADMIN ( 2 604800 86400 2419200 604800 )
 @   IN  NS  $HOST_MASTER.$DOM.
 EOF
             cat > "$EINVERSO" <<EOF
 \$TTL 604800
-@   IN  SOA $EINV_RED.in-addr.arpa. $EADMIN ( 2 604800 86400 2419200 604800 )
+@   IN  SOA $HOST_MASTER.$DOM. $EADMIN ( 2 604800 86400 2419200 604800 )
 @   IN  NS  $HOST_MASTER.$DOM.
 EOF
             
-            # Hosts de la Zona Extra
             echo
             read -p "¿Cuántos hosts vas a crear en $EDOM? (0 si ninguno): " ENUM_HOSTS
             if [[ $ENUM_HOSTS -gt 0 ]]; then
@@ -263,9 +253,6 @@ EOF
         done
     fi
 
-    # ========================================================
-    # PREGUNTAR POR OTRA RED / ZONA PRINCIPAL
-    # ========================================================
     echo
     echo "=========================================================="
     read -p "¿Deseas configurar OTRA Zona Principal en una red distinta? (s/n): " OTRA_RED
@@ -276,7 +263,7 @@ EOF
 done
 
 # ========================================================
-# CREAR INSTALADOR (SOLO PARA EL MAESTRO)
+# CREAR INSTALADOR 
 # ========================================================
 cat > "$INSTALL_SCRIPT" << 'EOF'
 #!/bin/bash
@@ -310,13 +297,9 @@ chmod +x "$INSTALL_SCRIPT"
 
 clear
 echo "=========================================================="
-echo "    SCRIPT DE DNS MAESTRO GENERADO CON ÉXITO"
+echo "    SCRIPT DE DNS MAESTRO (FIX WINDOWS) GENERADO"
 echo "=========================================================="
 echo "ARCHIVOS GENERADOS EN: $DIR/"
 echo "Para instalar en ESTA máquina ejecuta:"
 echo "  cd $DIR && sudo ./instalar_master.sh"
-echo ""
-echo "Si configuraste un esclavo LINUX, llévate el archivo:"
-echo "  $DIR/named.conf.local.slave"
-echo "al servidor Esclavo e inclúyelo en su configuración."
 echo "=========================================================="
