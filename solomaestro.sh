@@ -13,9 +13,10 @@ echo "" > "$CONFIG"
 echo "" > "$CONFIG_SLAVE"
 
 echo "=========================================================="
-echo "        GENERADOR BIND9 - MODO MAESTRO PURO (FIX ZONAS)"
+echo "      GENERADOR BIND9 - MODO MAESTRO PURO (FORMATO EXACTO)"
 echo "=========================================================="
 
+# Bucle Principal de Redes/Zonas Maestras
 ZONA_NUM=1
 while true; do
     echo
@@ -26,11 +27,11 @@ while true; do
     read -p "¿Vas a configurar una Zona Principal ahora mismo? (s/n): " CONF_PRINCIPAL
     
     if [[ "$CONF_PRINCIPAL" == "s" || "$CONF_PRINCIPAL" == "S" ]]; then
-        read -p "Nombre del Dominio (ej: principal.com): " DOM
-        read -p "Red de este dominio (SOLO 3 OCTETOS, ej: 192.168.1): " RED
-        read -p "Hostname de ESTE servidor Maestro (ej: ns1): " HOST_MASTER
+        read -p "Nombre del Dominio (ej: nombre.com): " DOM
+        read -p "Red de este dominio (SOLO 3 OCTETOS, ej: 10.12.14): " RED
+        read -p "Hostname de ESTE servidor Maestro (ej: ubuntu): " HOST_MASTER
         read -p "IP de ESTE servidor Maestro: " IP_MASTER
-        read -p "Correo del Administrador (ej: admin.principal.com.): " ADMIN
+        read -p "Correo del Administrador (ej: maaster.gmail.com.): " ADMIN
         
         INV_RED=$(echo $RED | awk -F. '{print $3"."$2"."$1}')
         
@@ -38,8 +39,8 @@ while true; do
         
         if [[ "$TRANSF_PRINCIPAL" == "s" || "$TRANSF_PRINCIPAL" == "S" ]]; then
             read -p "¿El servidor Esclavo es Windows o Linux? (w/l): " OS_ESCLAVO
+            read -p "Hostname del Esclavo (ej: windows): " HOST_SLAVE
             read -p "IP del servidor Esclavo: " IP_SLAVE
-            read -p "Hostname del Esclavo (ej: ns2): " HOST_SLAVE
             
             cat >> "$CONFIG" <<EOF
 
@@ -100,59 +101,72 @@ EOF
         fi
 
         # ========================================================
-        # GENERACIÓN DEL FICHERO DIRECTO (CALCADO A LA CAPTURA)
+        # ESTRUCTURA EXACTA: FICHERO DIRECTO
         # ========================================================
         DIRECTO="$DIR/zonas/db.$DOM"
         INVERSO="$DIR/zonas/db.$RED"
 
         cat > "$DIRECTO" <<EOF
-\$ORIGIN $DOM.
-\$TTL 86400
-@   IN  SOA $HOST_MASTER.$DOM. $ADMIN (
-                1
-                604800
-                86400
-                2419200
-                604800 )
-@   IN  NS  $HOST_MASTER.$DOM.
+\$TTL 604800
+@   IN   SOA   $HOST_MASTER.$DOM. $ADMIN (
+                  2          ; Serial
+             604800          ; Refresh
+              86400          ; Retry
+            2419200          ; Expire
+             604800 )        ; Negative Cache TTL
+
+; --- SERVIDORES NAMESERVERS (NS) ---
+@   IN   NS   $HOST_MASTER.$DOM.
 EOF
         if [[ "$TRANSF_PRINCIPAL" == "s" || "$TRANSF_PRINCIPAL" == "S" ]]; then
-            echo "@   IN  NS  $HOST_SLAVE.$DOM." >> "$DIRECTO"
+            echo "@   IN   NS   $HOST_SLAVE.$DOM." >> "$DIRECTO"
         fi
 
-        echo "$HOST_MASTER   IN  A   $IP_MASTER" >> "$DIRECTO"
+        cat >> "$DIRECTO" <<EOF
+
+; --- REGISTROS IP DE LOS NAMESERVERS ---
+$HOST_MASTER   IN   A   $IP_MASTER
+EOF
         if [[ "$TRANSF_PRINCIPAL" == "s" || "$TRANSF_PRINCIPAL" == "S" ]]; then
-            echo "$HOST_SLAVE   IN  A   $IP_SLAVE" >> "$DIRECTO"
+            echo "$HOST_SLAVE   IN   A   $IP_SLAVE" >> "$DIRECTO"
         fi
+        
+        echo "" >> "$DIRECTO"
+        echo "; --- OTROS HOSTS DE LA RED ---" >> "$DIRECTO"
 
         # ========================================================
-        # GENERACIÓN DEL FICHERO INVERSO (CALCADO A LA CAPTURA)
+        # ESTRUCTURA EXACTA: FICHERO INVERSO
         # ========================================================
         cat > "$INVERSO" <<EOF
-\$ORIGIN $INV_RED.in-addr.arpa.
-\$TTL 86400
-@   IN  SOA $HOST_MASTER.$DOM. $ADMIN (
-                1
-                604800
-                86400
-                2419200
-                604800 )
-@   IN  NS  $HOST_MASTER.$DOM.
+\$TTL 604800
+@   IN   SOA   $HOST_MASTER.$DOM. $ADMIN (
+                  2          ; Serial
+             604800          ; Refresh
+              86400          ; Retry
+            2419200          ; Expire
+             604800 )        ; Negative Cache TTL
+
+; --- SERVIDORES NAMESERVERS (NS) ---
+@   IN   NS   $HOST_MASTER.$DOM.
 EOF
         if [[ "$TRANSF_PRINCIPAL" == "s" || "$TRANSF_PRINCIPAL" == "S" ]]; then
-            echo "@   IN  NS  $HOST_SLAVE.$DOM." >> "$INVERSO"
+            echo "@   IN   NS   $HOST_SLAVE.$DOM." >> "$INVERSO"
         fi
 
+        cat >> "$INVERSO" <<EOF
+
+; --- REGISTROS INVERSOS (PTR) ---
+EOF
         OCT_MASTER=$(echo $IP_MASTER | awk -F. '{print $4}')
-        echo "$OCT_MASTER   IN  PTR $HOST_MASTER.$DOM." >> "$INVERSO"
+        echo "$OCT_MASTER   IN   PTR   $HOST_MASTER.$DOM." >> "$INVERSO"
         
         if [[ "$TRANSF_PRINCIPAL" == "s" || "$TRANSF_PRINCIPAL" == "S" ]]; then
             OCT_SLAVE=$(echo $IP_SLAVE | awk -F. '{print $4}')
-            echo "$OCT_SLAVE   IN  PTR $HOST_SLAVE.$DOM." >> "$INVERSO"
+            echo "$OCT_SLAVE   IN   PTR   $HOST_SLAVE.$DOM." >> "$INVERSO"
         fi
 
         # ========================================================
-        # HOSTS EXTRA DE LA ZONA
+        # AÑADIR HOSTS A LA ESTRUCTURA
         # ========================================================
         echo
         read -p "¿Cuántos hosts extra vas a configurar en $DOM? (0 si ninguno): " NUM_HOSTS
@@ -160,19 +174,19 @@ EOF
             for ((h=1; h<=NUM_HOSTS; h++))
             do
                 echo "--- HOST $h ($DOM) ---"
-                read -p "Hostname (sin dominio, ej: pc1): " H_NAME
+                read -p "Hostname (sin dominio, ej: windows10): " H_NAME
                 read -p "Alias CNAME (deja vacío si no tiene): " H_ALIAS
                 read -p "IP completa del host: " H_IP
                 
-                echo "$H_NAME   IN  A   $H_IP" >> "$DIRECTO"
+                echo "$H_NAME   IN   A   $H_IP" >> "$DIRECTO"
                 if [[ -n "$H_ALIAS" ]]; then
-                    echo "$H_ALIAS   IN  CNAME $H_NAME" >> "$DIRECTO"
+                    echo "$H_ALIAS   IN   CNAME   $H_NAME" >> "$DIRECTO"
                 fi
                 
                 OCT_H=$(echo $H_IP | awk -F. '{print $4}')
                 read -p "¿Añadir PTR a la inversa para $H_NAME? (s/n): " ADD_PTR
                 if [[ "$ADD_PTR" == "s" || "$ADD_PTR" == "S" ]]; then
-                    echo "$OCT_H   IN  PTR $H_NAME.$DOM." >> "$INVERSO"
+                    echo "$OCT_H   IN   PTR   $H_NAME.$DOM." >> "$INVERSO"
                 fi
             done
         fi
@@ -190,9 +204,12 @@ EOF
         do
             echo
             echo "=== ZONA EXTRA $e ==="
-            read -p "Nombre COMPLETO del dominio (ej: sub.dominio.org o otro.com): " EDOM
+            read -p "Nombre COMPLETO del dominio (ej: sub.nombre.com): " EDOM
             read -p "Red de este dominio (SOLO 3 OCTETOS, ej: 10.0.0): " ERED
+            read -p "Hostname de ESTE Maestro para esta zona (ej: ubuntu): " EHOST_MASTER
+            read -p "IP de ESTE servidor Maestro: " EIP_MASTER
             read -p "¿Esclavo de destino es Windows o Linux? (w/l): " EOS_ESCLAVO
+            read -p "Hostname del Esclavo destino (ej: windows): " EHOST_SLAVE
             read -p "IP del Esclavo destino: " EIP_SLAVE
             read -p "Correo del Administrador: " EADMIN
             
@@ -226,14 +243,14 @@ EOF
 zone "$EDOM" {
     type slave;
     file "/var/cache/bind/db.$EDOM";
-    masters { $IP_MASTER; };
+    masters { $EIP_MASTER; };
     allow-query { any; };
 };
 
 zone "$EINV_RED.in-addr.arpa" {
     type slave;
     file "/var/cache/bind/db.$ERED";
-    masters { $IP_MASTER; };
+    masters { $EIP_MASTER; };
     allow-query { any; };
 };
 EOF
@@ -242,29 +259,49 @@ EOF
             EDIRECTO="$DIR/zonas/db.$EDOM"
             EINVERSO="$DIR/zonas/db.$ERED"
 
-            # Formato de capturas para las zonas extra
+            # ========================================================
+            # ESTRUCTURA EXACTA PARA ZONAS EXTRA
+            # ========================================================
             cat > "$EDIRECTO" <<EOF
-\$ORIGIN $EDOM.
-\$TTL 86400
-@   IN  SOA $HOST_MASTER.$DOM. $EADMIN (
-                1
-                604800
-                86400
-                2419200
-                604800 )
-@   IN  NS  $HOST_MASTER.$DOM.
+\$TTL 604800
+@   IN   SOA   $EHOST_MASTER.$EDOM. $EADMIN (
+                  2          ; Serial
+             604800          ; Refresh
+              86400          ; Retry
+            2419200          ; Expire
+             604800 )        ; Negative Cache TTL
+
+; --- SERVIDORES NAMESERVERS (NS) ---
+@   IN   NS   $EHOST_MASTER.$EDOM.
+@   IN   NS   $EHOST_SLAVE.$EDOM.
+
+; --- REGISTROS IP DE LOS NAMESERVERS ---
+$EHOST_MASTER   IN   A   $EIP_MASTER
+$EHOST_SLAVE   IN   A   $EIP_SLAVE
+
+; --- OTROS HOSTS DE LA RED ---
 EOF
+
             cat > "$EINVERSO" <<EOF
-\$ORIGIN $EINV_RED.in-addr.arpa.
-\$TTL 86400
-@   IN  SOA $HOST_MASTER.$DOM. $EADMIN (
-                1
-                604800
-                86400
-                2419200
-                604800 )
-@   IN  NS  $HOST_MASTER.$DOM.
+\$TTL 604800
+@   IN   SOA   $EHOST_MASTER.$EDOM. $EADMIN (
+                  2          ; Serial
+             604800          ; Refresh
+              86400          ; Retry
+            2419200          ; Expire
+             604800 )        ; Negative Cache TTL
+
+; --- SERVIDORES NAMESERVERS (NS) ---
+@   IN   NS   $EHOST_MASTER.$EDOM.
+@   IN   NS   $EHOST_SLAVE.$EDOM.
+
+; --- REGISTROS INVERSOS (PTR) ---
 EOF
+            EOCT_MASTER=$(echo $EIP_MASTER | awk -F. '{print $4}')
+            echo "$EOCT_MASTER   IN   PTR   $EHOST_MASTER.$EDOM." >> "$EINVERSO"
+            
+            EOCT_SLAVE=$(echo $EIP_SLAVE | awk -F. '{print $4}')
+            echo "$EOCT_SLAVE   IN   PTR   $EHOST_SLAVE.$EDOM." >> "$EINVERSO"
             
             echo
             read -p "¿Cuántos hosts vas a crear en $EDOM? (0 si ninguno): " ENUM_HOSTS
@@ -276,15 +313,15 @@ EOF
                     read -p "Alias CNAME (deja vacío si no tiene): " EH_ALIAS
                     read -p "IP completa del host: " EH_IP
                     
-                    echo "$EH_NAME   IN  A   $EH_IP" >> "$EDIRECTO"
+                    echo "$EH_NAME   IN   A   $EH_IP" >> "$EDIRECTO"
                     if [[ -n "$EH_ALIAS" ]]; then
-                        echo "$EH_ALIAS   IN  CNAME $EH_NAME" >> "$EDIRECTO"
+                        echo "$EH_ALIAS   IN   CNAME   $EH_NAME" >> "$EDIRECTO"
                     fi
                     
                     EOCT_H=$(echo $EH_IP | awk -F. '{print $4}')
                     read -p "¿Añadir PTR a la inversa para $EH_NAME? (s/n): " EADD_PTR
                     if [[ "$EADD_PTR" == "s" || "$EADD_PTR" == "S" ]]; then
-                        echo "$EOCT_H   IN  PTR $EH_NAME.$EDOM." >> "$EINVERSO"
+                        echo "$EOCT_H   IN   PTR   $EH_NAME.$EDOM." >> "$EINVERSO"
                     fi
                 done
             fi
@@ -335,7 +372,7 @@ chmod +x "$INSTALL_SCRIPT"
 
 clear
 echo "=========================================================="
-echo "    SCRIPT DE DNS MAESTRO (CON ESTRUCTURA DE ZONA FIJADA)"
+echo "   SCRIPT DE DNS MAESTRO (ESTRUCTURA EXACTA) GENERADO"
 echo "=========================================================="
 echo "ARCHIVOS GENERADOS EN: $DIR/"
 echo "Para instalar en ESTA máquina ejecuta:"
