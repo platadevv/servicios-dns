@@ -28,11 +28,11 @@ echo "      MEGA ASISTENTE BIND9 + DHCP (DEBIAN/UBUNTU)"
 echo "=========================================================="
 echo "Elige el escenario que deseas configurar:"
 echo "  1) Modo Híbrido: Esclavo de Principal + DDNS Maestro local"
-echo "  2) Modo DDNS puro: Solo DDNS Maestro local (Sin Maestro externo)"
+echo "  2) Modo Puro: Solo DDNS Maestro local (Sin Maestro externo)"
 echo "  3) Modo Delegado: Esclavo de TODAS las zonas + DHCP al Maestro"
-echo "  4) Modo Esclavo normal: Solo DNS Esclavo"
+echo "  4) Modo Esclavo Puro: Solo DNS Esclavo (APAGA EL DHCP LOCAL)"
 echo "  5) Limpieza Total: Resetear Servidor (Borrar rastros)"
-echo "  6) Modo Normal Master/Slave: Generador DNS Master/Slave"
+echo "  6) Modo Estático: Generador DNS Clásico Master/Slave (TU SCRIPT)"
 echo "  7) Salir"
 echo "=========================================================="
 read -p "Opción [1-7]: " OPCION
@@ -527,24 +527,31 @@ INTERFACESv6=""
 EOF
 fi
 
+# ========================================================
+# BLOQUE DE ZONAS ESCLAVAS (MODIFICADO PARA BUCLE)
+# ========================================================
 if [[ "$OPCION" == "1" || "$OPCION" == "3" || "$OPCION" == "4" ]]; then
     echo
-    echo "--- CONFIGURACIÓN DE LA ZONA PRINCIPAL ESCLAVA ---"
-    read -p "IP del servidor Maestro (Windows o Linux) (ej: 192.168.1.10): " IP_MAESTRO
-    read -p "Nombre del dominio principal (ej: principal.com): " DOM_SLAVE
-    read -p "Red de la zona inversa del maestro (SOLO 3 OCTETOS) (ej: 192.168.1): " RED_INV_MASTER
+    echo "--- CONFIGURACIÓN DE ZONAS ESCLAVAS ---"
+    read -p "¿Cuántas zonas vas a transferir del Maestro? (ej: 1): " NUM_SLAVES
     
-    INV_MASTER_ARPA=$(echo $RED_INV_MASTER | awk -F. '{print $3"."$2"."$1}')
-    
-    echo
-    read -p "Nombre de la carpeta para guardar estas zonas en /etc/bind/ (ej: esclavos): " CARPETA_ESCLAVOS
-    CARPETA_ESCLAVOS=${CARPETA_ESCLAVOS:-esclavos}
+    if [[ $NUM_SLAVES -gt 0 ]]; then
+        read -p "IP del servidor Maestro (Windows o Linux) (ej: 192.168.1.10): " IP_MAESTRO
+        read -p "Nombre de la carpeta para guardar estas zonas en /etc/bind/ (ej: esclavos): " CARPETA_ESCLAVOS
+        CARPETA_ESCLAVOS=${CARPETA_ESCLAVOS:-esclavos}
 
-    echo "/etc/bind/$CARPETA_ESCLAVOS/** rw," >> "$APPARMOR_FILE"
+        echo "/etc/bind/$CARPETA_ESCLAVOS/** rw," >> "$APPARMOR_FILE"
 
-    cat >> "$CONFIG" <<EOF
+        for ((s=1; s<=NUM_SLAVES; s++))
+        do
+            echo
+            echo "=== ZONA ESCLAVA $s ==="
+            read -p "Nombre del dominio (ej: principal.com): " DOM_SLAVE
+            read -p "Red de la zona inversa (SOLO 3 OCTETOS, deja vacio si no tiene): " RED_INV_MASTER
+            
+            cat >> "$CONFIG" <<EOF
 // ====================================================
-// ZONA ESCLAVA 
+// ZONA ESCLAVA: $DOM_SLAVE
 // ====================================================
 zone "$DOM_SLAVE" {
     type slave;
@@ -552,6 +559,10 @@ zone "$DOM_SLAVE" {
     masters { $IP_MAESTRO; };
     allow-query { any; };
 };
+EOF
+            if [[ -n "$RED_INV_MASTER" ]]; then
+                INV_MASTER_ARPA=$(echo $RED_INV_MASTER | awk -F. '{print $3"."$2"."$1}')
+                cat >> "$CONFIG" <<EOF
 
 zone "$INV_MASTER_ARPA.in-addr.arpa" {
     type slave;
@@ -560,6 +571,9 @@ zone "$INV_MASTER_ARPA.in-addr.arpa" {
     allow-query { any; };
 };
 EOF
+            fi
+        done
+    fi
 fi
 
 if [[ "$OPCION" == "1" || "$OPCION" == "2" || "$OPCION" == "3" ]]; then
@@ -761,7 +775,7 @@ chmod +x "$INSTALL_SCRIPT"
 
 clear
 echo "=========================================================="
-echo "    MEGA SCRIPT (V6) GENERADO CON ÉXITO"
+echo "    MEGA SCRIPT (V6.1) GENERADO CON ÉXITO"
 echo "=========================================================="
 echo "Configuracion generada en la carpeta: $DIR"
 echo "Para instalarla ejecuta:"
